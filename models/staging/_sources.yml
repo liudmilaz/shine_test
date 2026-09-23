@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: intercom_raw
+    database: RAW
+    schema: INTERCOM
+    tables:
+      - name: stg_intercom_conversations
+      - name: stg_intercom_conversation_parts
+      - name: dim_clients
+      - name: dim_dates

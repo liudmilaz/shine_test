@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: int_dim_clients_current
+    description: >
+      dim_clients deduped to exactly one "current" row per client.
+      _is_latest alone isn't safe to trust (see CODE_REVIEW.md) -
+      the unique test below is what would have caught that in CI.
+    columns:
+      - name: sev_client_id
+        tests:
+          - unique
+          - not_null
+
+  - name: int_intercom_conversation_metrics
+    description: One row per conversation, with elapsed-time metrics resolved via aggregation instead of a fan-out join.
+    columns:
+      - name: conversation_id
+        tests:
+          - unique
+          - not_null

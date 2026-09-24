@@ -2,7 +2,10 @@ version: 2
 
 sources:
   - name: intercom_raw
-    database: RAW
+    # Points at RAW by default; pass --vars '{raw_database: TEST_ENV}' to
+    # point at the zero-copy clone instead, so remodeling never touches
+    # the original loaded data.
+    database: "{{ var('raw_database', 'RAW') }}"
     schema: INTERCOM
     tables:
       - name: stg_intercom_conversations

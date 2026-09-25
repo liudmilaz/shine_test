@@ -20,6 +20,18 @@ models:
       - name: chat_count
         data_tests:
           - not_null
+          # Anomaly check: day-over-day change in chat volume (log scale)
+          # compared to the rolling mean/stddev of the previous 7 days;
+          # flags any day more than 3 standard deviations out.
+          - dbt_expectations.expect_column_values_to_be_within_n_moving_stdevs:
+              arguments:
+                date_column_name: date_day
+                period: day
+                trend_periods: 7
+                test_periods: "{{ var('anomaly_test_periods') }}"
+                sigma_threshold: 3
+              config:
+                severity: warn
       - name: chat_first_response_60_sec_count
         data_tests:
           - not_null

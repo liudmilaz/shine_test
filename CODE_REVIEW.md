@@ -12,6 +12,15 @@ metric output to a manual count. See `models/` for the corrected models
 and `case_review_reference/fct_intercom_conversations_daily_ASIS.sql` for
 the original.
 
+The as-given SQL was also run directly in Snowflake, with its four `ref()`s
+replaced by the untouched upstream tables in `RAW.INTERCOM`. Snowflake
+reports one compile error at a time, so each was fixed in a scratch copy to
+reach the next. In the order Snowflake reported them: the trailing comma
+after the last CTE (#5), `date_trunc` with three arguments (#2), the
+`combined.`-prefixed aggregate aliases (#3), and the missing `group by`
+(#4). With those four fixed the query compiles - and returns **no rows at
+all**, because of #10.
+
 ## Subtask 1 — Syntactic, logical, and functional mistakes
 
 ### Syntax errors (won't compile)
@@ -31,29 +40,38 @@ the original.
    also dimensionally wrong for that intent — dividing a minute value by
    60 gives hours, not seconds.
 
-3. **Alias referenced before/within the same `select` it's defined in**
-   — twice:
-   - `first_agent_replied_at_utc` is defined by a `case when` in the same
-     select list as the `date_trunc(...)` expression that immediately
-     tries to use it.
-   - In `conversations_daily`: `combined.chats_outside_business_hours_count
-     - combined.chat_count` and `combined.chat_first_response_60_sec_count
-     / coalesce(combined.chat_count, 0)` reference `chat_count`,
-     `chats_outside_business_hours_count`, and
-     `chat_first_response_60_sec_count` as if they were columns on
-     `combined` — but they're aggregate aliases being computed in *this*
-     query's own select list, and `combined` has no such columns at all.
-     Snowflake doesn't support this kind of lateral alias reference by
-     default; this raises `invalid identifier`.
+3. **Aggregate aliases referenced as columns of `combined`** — in
+   `conversations_daily`, `combined.chats_outside_business_hours_count -
+   combined.chat_count` and `combined.chat_first_response_60_sec_count /
+   coalesce(combined.chat_count, 0)` treat `chat_count`,
+   `chats_outside_business_hours_count` and
+   `chat_first_response_60_sec_count` as columns of the `combined` CTE.
+   They aren't: they're aliases computed in this same select list.
+   Confirmed: `invalid identifier 'COMBINED.CHATS_OUTSIDE_BUSINESS_HOURS_COUNT'`.
+   The `combined.` prefix is the error, not the reuse itself — Snowflake
+   does allow referring to an alias defined earlier in the same select
+   (a lateral column alias), and dropping the prefix compiles. The same
+   pattern on `first_agent_replied_at_utc` in `combined` compiles fine;
+   its problem is logical, see #7. Relying on lateral aliases is still
+   worth avoiding: it's Snowflake-specific and breaks on a port to most
+   other warehouses.
 
-4. **Trailing `;` and a `with ... select` combined into one statement**
-   — `final as (...) select * from final;`. A dbt model file must compile
-   to a single `select`; the stray semicolon is dead syntax at best and a
-   parse hazard in some execution paths.
+4. **Missing `group by` in `conversations_daily`** — it mixes aggregates
+   (`count`, `avg`) with a plain column (`combined.created_at_utc::date`)
+   and has no `group by` at all. Confirmed: `[CREATED_AT_UTC] is not a
+   valid group by expression`. Fix: `group by 1`.
+
+5. **Trailing comma after the last CTE, and a trailing `;`** — `final as
+   (...),` is followed directly by `select * from final;`. The comma tells
+   Snowflake another CTE follows. Confirmed: this is the first error
+   Snowflake reports, `syntax error line 120 at position 0 unexpected
+   'select'`. The `;` is a separate problem: a dbt model must compile to a
+   single statement, so the semicolon is at best dead syntax and at worst
+   breaks the statement dbt wraps around the model.
 
 ### Logical / functional mistakes (compiles fine elsewhere, produces wrong numbers)
 
-5. **`count(case when <cond> then 1 else 0 end)`** (×2: outside-hours
+6. **`count(case when <cond> then 1 else 0 end)`** (×2: outside-hours
    count, 60-second-reply count) — `COUNT()` counts non-NULL values. The
    `else 0` branch means *every* row produces a non-NULL value (0 or 1),
    so both counts always equal `count(*)`, regardless of the condition.
@@ -62,7 +80,20 @@ the original.
    (so non-matching rows are NULL and excluded) or use `sum(case when
    <cond> then 1 else 0 end)`.
 
-6. **Wrong grain: `conversations join conversation_parts using
+7. **`coalesce(time_to_first_agent_reply, 0)` turns "no reply on this row"
+   into "replied in 0 seconds"** — `first_agent_replied_at_utc` is a
+   `case when is_first_agent_reply ...` evaluated per message part, so it
+   is `NULL` on every part except the first agent reply. The elapsed time
+   is then `NULL` on those rows, and `coalesce(..., 0)` makes it 0 seconds
+   — which passes `<= 60`. Confirmed against real data: of the 3,303
+   joined rows, 3,213 count as "first reply within 60 seconds", and none
+   of those 3,213 is a reply at all; the 90 actual first replies all took
+   longer than 60 seconds (fastest: 82s). Even with #6 fixed,
+   `chat_reachability` would come out near 97% instead of the true 0%.
+   Fix: resolve the first reply per conversation (`min(created_at_utc)
+   where is_first_agent_reply`) and leave a missing reply as `NULL`.
+
+8. **Wrong grain: `conversations join conversation_parts using
    (conversation_id)`** is one-to-many (one conversation, many message
    parts). Every conversation-level column (`rating`,
    `was_conversation_outside_office_hours`, etc.) gets duplicated once
@@ -75,7 +106,7 @@ the original.
    day (e.g. 42 vs. 30 actual conversations on one day). This needs a
    conversation-grain intermediate step before the daily aggregation.
 
-7. **Unfiltered join to the SCD2 `dim_clients`** — `combined join clients
+9. **Unfiltered join to the SCD2 `dim_clients`** — `combined join clients
    using (sev_client_id)` with no filter to a current/point-in-time
    version. `dim_clients` carries full history (`_valid_from_utc`,
    `_valid_to_utc`, `_is_latest`); joining on `sev_client_id` alone fans
@@ -83,24 +114,28 @@ the original.
    after correctly filtering to `_is_latest = true`, several clients still
    had more than one "latest" row (the sample data contains literal
    duplicate rows per SCD2 version), which continued to fan out
-   `chat_count`. A safe join needs an explicit tiebreaker, e.g.
-   `qualify row_number() over (partition by sev_client_id order by
-   _valid_from_utc desc) = 1`, not a bare `using` join.
+   `chat_count`. The duplicates are exact copies (2,026 rows, 1,831
+   distinct), so the fix has two parts: remove the copies as early as
+   possible (in the remodel: `qualify row_number() over (partition by
+   sev_client_id, _valid_from_utc ...) = 1` in `stg_clients`), then join
+   only the `_is_latest` version, guarded by a `unique` test on
+   `sev_client_id` — not a bare `using` join.
 
-8. **`where clients.is_test_account != true`** — if `is_test_account` is
-   `NULL` for any client, `NULL != true` evaluates to `NULL`, not `TRUE`,
-   so that row is silently dropped from the `WHERE` clause — a client with
-   an unset flag is excluded from the report entirely rather than treated
-   as "not a test account". Fix: `where coalesce(clients.is_test_account,
-   false) = false`.
+10. **`where clients.is_test_account != true`** — `NULL != true`
+    evaluates to `NULL`, not `TRUE`, so any client whose flag is unset is
+    dropped rather than treated as "not a test account". In this data
+    that is every real client: `is_test_account` is never `FALSE` — it is
+    `TRUE` for the 4 test clients and `NULL` for all 83 others. Confirmed:
+    with the syntax errors fixed, the as-given query returns **zero
+    rows**. Fix: `where coalesce(clients.is_test_account, false) = false`.
 
-9. **`combined.chat_first_response_60_sec_count / coalesce(combined.chat_count,
+11. **`combined.chat_first_response_60_sec_count / coalesce(combined.chat_count,
    0)`** — beyond the alias-reference syntax error (#3), dividing by
    `coalesce(chat_count, 0)` will raise a division-by-zero error on any
    day with zero conversations, rather than a safe `NULL`. Should be
    `nullif(chat_count, 0)` in the denominator.
 
-10. **`coalesce(conversations.rating, 0) as rating`** applied *before*
+12. **`coalesce(conversations.rating, 0) as rating`** applied *before*
     `avg(rating)` downstream — unrated conversations become a rating of
     `0` (the worst possible score) rather than being excluded. `AVG()`
     already ignores `NULL`s correctly on its own; coalescing beforehand
@@ -109,7 +144,7 @@ the original.
     metrics (never the rating itself) changes `chat_avg_rating` materially
     on days with any unrated chats.
 
-11. **`from dates join conversations_daily using (date_day)`** — an
+13. **`from dates join conversations_daily using (date_day)`** — an
     `INNER JOIN`, despite the comment directly above it saying "Fill up
     dates without any created chats". An inner join does the opposite: it
     drops every date that has no matching row in `conversations_daily`,
@@ -120,7 +155,7 @@ the original.
     sample) disappears from the output entirely instead of showing zeros.
     Fix: `left join conversations_daily using (date_day)`.
 
-12. **Dead columns**: `is_first_conversation_part` and
+14. **Dead columns**: `is_first_conversation_part` and
     `is_last_conversation_part` are computed with `row_number() over
     (order by conversation_parts.created_at_utc)` — with **no
     `partition by conversation_id`** — so they number rows across the
@@ -130,8 +165,8 @@ the original.
 
 ## Subtask 2 — Modeling approach feedback
 
-**Grain discipline.** The core issue behind several bugs above (#5, #6,
-#9) is that the model does everything in one flat `combined` CTE at
+**Grain discipline.** The core issue behind several bugs above (#6, #7,
+#8, #11) is that the model does everything in one flat `combined` CTE at
 conversation-*part* grain, then tries to compute conversation- and
 day-level metrics on top of it in a single pass. Splitting this into
 clear layers fixes it structurally, not just patches the symptoms:
@@ -144,7 +179,7 @@ clear layers fixes it structurally, not just patches the symptoms:
   happened to multiply the grain by"
 
 This is the classic staging → intermediate → mart shape and would have
-made bugs #5–#9 much harder to introduce in the first place.
+made bugs #6–#11 much harder to introduce in the first place.
 
 **Defensive dimension joins.** Never join a dimension "using" its
 business key alone if the dimension is SCD-tracked, even one flagged with

@@ -1,14 +1,42 @@
 version: 2
 
+# Simulated source layer. The case ships these four tables as outputs of
+# upstream dbt models (stg_*/dim_*). Here we treat them as raw source data
+# instead, so the project shows the full layering:
+#
+#   source src_<entity>  ->  stg_<entity>  ->  dim_<entity> / fct_*
+#
+# Trade-offs of this decision:
+#   + Every layer has one job: sources are raw, stg_ renames/casts 1:1 with
+#     a source, dim_/fct_ hold business entities. dim_ models no longer sit
+#     in staging/, which misrepresented them as source-conformed.
+#   + The four model names the reviewed fct model refs (stg_intercom_*,
+#     dim_clients, dim_dates) are unchanged, so it and the as-given _ASIS
+#     file still resolve - no breaking change for their consumers.
+#   - stg_clients and stg_dates are pure passthroughs today: two extra
+#     views that add no logic, only structure. Worth it for a real source
+#     that needs renaming/casting; overhead for this static sample.
+#   - It's a simulation: the case says these tables are given model
+#     outputs, so dim_clients/dim_dates now look "owned" by this project
+#     when upstream really built them.
+#   - Only the logical source names change. identifier: keeps pointing at
+#     the physical tables in RAW.INTERCOM (still named STG_*/DIM_*), because
+#     renaming them in Snowflake would break the main branch, the dev
+#     schema and the TEST_ENV clone, and RAW is treated as immutable.
+#
+# The database points at RAW by default; pass --vars '{raw_database: TEST_ENV}'
+# to read from the zero-copy clone instead.
+
 sources:
   - name: intercom_raw
-    # Points at RAW by default; pass --vars '{raw_database: TEST_ENV}' to
-    # point at the zero-copy clone instead, so remodeling never touches
-    # the original loaded data.
     database: "{{ var('raw_database', 'RAW') }}"
     schema: INTERCOM
     tables:
-      - name: stg_intercom_conversations
-      - name: stg_intercom_conversation_parts
-      - name: dim_clients
-      - name: dim_dates
+      - name: src_intercom_conversations
+        identifier: STG_INTERCOM_CONVERSATIONS
+      - name: src_intercom_conversation_parts
+        identifier: STG_INTERCOM_CONVERSATION_PARTS
+      - name: src_clients
+        identifier: DIM_CLIENTS
+      - name: src_dates
+        identifier: DIM_DATES

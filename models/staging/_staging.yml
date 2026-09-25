@@ -51,11 +51,11 @@ models:
         data_tests:
           - not_null
 
-  - name: dim_clients
+  - name: stg_clients
     description: >
-      SCD2 client dimension, as given. The sample contains exact duplicate
+      Clients source, SCD2 history. The sample contains exact duplicate
       rows per version, so the uniqueness test below is severity: warn - it
-      documents a known upstream issue that int_dim_clients_current handles.
+      documents a known source issue that int_dim_clients_current handles.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -72,7 +72,7 @@ models:
         data_tests:
           - not_null
 
-  - name: dim_dates
+  - name: stg_dates
     columns:
       - name: date_day
         data_tests:

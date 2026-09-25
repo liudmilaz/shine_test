@@ -1,1 +1,1 @@
-select * from {{ source('intercom_raw', 'stg_intercom_conversations') }}
+select * from {{ source('intercom_raw', 'src_intercom_conversations') }}

@@ -1,6 +1,21 @@
 version: 2
 
 models:
+  - name: dim_clients
+    description: Client dimension with full SCD2 history (one row per client version).
+    columns:
+      - name: sev_client_id
+        data_tests:
+          - not_null
+
+  - name: dim_dates
+    description: Date spine, one row per calendar day.
+    columns:
+      - name: date_day
+        data_tests:
+          - unique
+          - not_null
+
   - name: fct_intercom_conversations_daily
     description: Daily aggregation of in-app chat performance metrics.
     data_tests:

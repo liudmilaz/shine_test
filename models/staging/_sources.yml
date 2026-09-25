@@ -38,5 +38,16 @@ sources:
         identifier: STG_INTERCOM_CONVERSATION_PARTS
       - name: src_clients
         identifier: DIM_CLIENTS
+        data_tests:
+          # Warns by design: the source sends each SCD2 version as several
+          # exact copies. stg_clients removes them; this keeps the upstream
+          # issue visible so it can be raised with the data's owner.
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns:
+                  - sev_client_id
+                  - _valid_from_utc
+              config:
+                severity: warn
       - name: src_dates
         identifier: DIM_DATES

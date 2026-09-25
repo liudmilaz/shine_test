@@ -53,17 +53,15 @@ models:
 
   - name: stg_clients
     description: >
-      Clients source, SCD2 history. The sample contains exact duplicate
-      rows per version, so the uniqueness test below is severity: warn - it
-      documents a known source issue that int_dim_clients_current handles.
+      Clients, SCD2 history, deduplicated to one row per client version.
+      The source's duplicate copies are still reported by a warn-level
+      test on src_clients; this one must pass.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
               - sev_client_id
               - _valid_from_utc
-          config:
-            severity: warn
     columns:
       - name: sev_client_id
         data_tests:

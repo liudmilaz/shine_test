@@ -17,8 +17,12 @@
 --     would misrepresent "no data" as "bad data"
 --   - rating is no longer coalesced to 0 before AVG(), which had been
 --     dragging chat_avg_rating down for every unrated conversation
---   - date spine is bounded to the observed conversation range instead
---     of enumerating the full multi-year dim_dates table
+--   - date spine is bounded to the observed (non-test) conversation range
+--     instead of enumerating the full multi-year dim_dates table
+--   - left join to clients, so a conversation with no current client row
+--     is kept rather than silently dropped (caught by a relationships test)
+--   - chats still open with no agent reply are left out of reachability,
+--     so recent days aren't understated and then revised upward later
 
 with
 
@@ -48,13 +52,14 @@ conversations_daily as (
         sum(case when conversations.time_to_first_agent_reply_seconds <= 60 then 1 else 0 end)
             as chat_first_response_60_sec_count,
         sum(case when conversations.time_to_first_agent_reply_seconds <= 60 then 1 else 0 end)
-            / nullif(count(*), 0) as chat_reachability,
+            / nullif(sum(case when not conversations.is_awaiting_first_reply then 1 else 0 end), 0)
+            as chat_reachability,
 
         avg(conversations.time_to_last_close_seconds) as chat_avg_handling_time_seconds,
         avg(conversations.rating) as chat_avg_rating
 
     from conversations
-    inner join clients using (sev_client_id)
+    left join clients using (sev_client_id)
     where coalesce(clients.is_test_account, false) = false
 
     group by 1
@@ -69,6 +74,7 @@ spined as (
         coalesce(conversations_daily.chat_count, 0) as chat_count,
         coalesce(conversations_daily.chats_outside_business_hours_count, 0) as chats_outside_business_hours_count,
         coalesce(conversations_daily.chats_inside_business_hours_count, 0) as chats_inside_business_hours_count,
+        coalesce(conversations_daily.chat_first_response_60_sec_count, 0) as chat_first_response_60_sec_count,
 
         conversations_daily.chat_reachability,
         conversations_daily.chat_avg_handling_time_seconds,
@@ -76,7 +82,8 @@ spined as (
 
     from dates
     left join conversations_daily using (date_day)
-    where dates.date_day between (select min(date_day) from conversations) and (select max(date_day) from conversations)
+    where dates.date_day between (select min(date_day) from conversations_daily)
+                             and (select max(date_day) from conversations_daily)
 
 )
 

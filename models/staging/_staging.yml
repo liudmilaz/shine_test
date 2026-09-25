@@ -1,0 +1,80 @@
+version: 2
+
+# Recency tests are severity: warn. The case's sample data stops at
+# 2025-01-08, so they will warn on every run here - in production they'd
+# flag a stalled Intercom sync.
+
+models:
+  - name: stg_intercom_conversations
+    data_tests:
+      - dbt_utils.recency:
+          arguments:
+            datepart: day
+            field: created_at_utc
+            interval: 1
+          config:
+            severity: warn
+    columns:
+      - name: conversation_id
+        data_tests:
+          - unique
+          - not_null
+      - name: sev_client_id
+        data_tests:
+          - not_null
+      - name: created_at_utc
+        data_tests:
+          - not_null
+
+  - name: stg_intercom_conversation_parts
+    data_tests:
+      - dbt_utils.recency:
+          arguments:
+            datepart: day
+            field: created_at_utc
+            interval: 1
+          config:
+            severity: warn
+    columns:
+      - name: conversation_part_id
+        data_tests:
+          - unique
+          - not_null
+      - name: conversation_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_intercom_conversations')
+                field: conversation_id
+      - name: created_at_utc
+        data_tests:
+          - not_null
+
+  - name: dim_clients
+    description: >
+      SCD2 client dimension, as given. The sample contains exact duplicate
+      rows per version, so the uniqueness test below is severity: warn - it
+      documents a known upstream issue that int_dim_clients_current handles.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - sev_client_id
+              - _valid_from_utc
+          config:
+            severity: warn
+    columns:
+      - name: sev_client_id
+        data_tests:
+          - not_null
+      - name: _valid_from_utc
+        data_tests:
+          - not_null
+
+  - name: dim_dates
+    columns:
+      - name: date_day
+        data_tests:
+          - unique
+          - not_null

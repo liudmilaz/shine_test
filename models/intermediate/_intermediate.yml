@@ -8,7 +8,7 @@ models:
       the unique test below is what would have caught that in CI.
     columns:
       - name: sev_client_id
-        tests:
+        data_tests:
           - unique
           - not_null
 
@@ -16,6 +16,21 @@ models:
     description: One row per conversation, with elapsed-time metrics resolved via aggregation instead of a fan-out join.
     columns:
       - name: conversation_id
-        tests:
+        data_tests:
           - unique
+          - not_null
+      - name: sev_client_id
+        data_tests:
+          - not_null
+          # The fct model left-joins clients so orphans aren't dropped;
+          # this surfaces them instead of letting them pass silently.
+          - relationships:
+              arguments:
+                to: ref('int_dim_clients_current')
+                field: sev_client_id
+      - name: date_day
+        data_tests:
+          - not_null
+      - name: is_awaiting_first_reply
+        data_tests:
           - not_null

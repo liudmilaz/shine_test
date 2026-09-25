@@ -43,6 +43,12 @@ final as (
         conversations.last_closed_at_utc,
         first_agent_reply.first_agent_replied_at_utc,
 
+        -- Still open with no agent reply yet: its reply time isn't known,
+        -- so it can't count as reached or not reached.
+        coalesce(conversations.is_currently_open, false)
+            and first_agent_reply.first_agent_replied_at_utc is null
+            as is_awaiting_first_reply,
+
         datediff(
             'second', conversations.created_at_utc, first_agent_reply.first_agent_replied_at_utc
         ) as time_to_first_agent_reply_seconds,

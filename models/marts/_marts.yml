@@ -3,8 +3,23 @@ version: 2
 models:
   - name: fct_intercom_conversations_daily
     description: Daily aggregation of in-app chat performance metrics.
+    data_tests:
+      # Warns on this static sample (data ends 2025-01-08); see _staging.yml.
+      - dbt_utils.recency:
+          arguments:
+            datepart: day
+            field: date_day
+            interval: 1
+          config:
+            severity: warn
     columns:
       - name: date_day
-        tests:
+        data_tests:
           - unique
+          - not_null
+      - name: chat_count
+        data_tests:
+          - not_null
+      - name: chat_first_response_60_sec_count
+        data_tests:
           - not_null

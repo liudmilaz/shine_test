@@ -3,17 +3,18 @@
 Dialect reviewed: **Snowflake** (as given in the case).
 
 Setup used to verify these findings: the case's CSV excerpts loaded into
-`RAW.INTERCOM.*`, zero-copy cloned to `TEST_ENV.INTERCOM` (`CREATE SCHEMA
-TEST_ENV.INTERCOM CLONE RAW.INTERCOM`), and the remodeled version of this
-model built and queried against the clone via `dbt run --target test
---vars '{raw_database: TEST_ENV}'`. Every bug below either threw a real
-compile/runtime error against this data, or was confirmed by comparing
-metric output to a manual count. See `models/` for the corrected models
-and `case_review_reference/fct_intercom_conversations_daily_ASIS.sql` for
-the original.
+`SHINE_RAW.INTERCOM` (never modified; dbt can only read it), zero-copy cloned
+into `SHINE_DEV.SRC` (`dbt run-operation refresh_src`), and the remodeled
+version of this model built and queried there with `dbt build` (the default
+`dev` target, one schema per layer: `STAGING`, `INTERMEDIATE`, `MARTS`).
+Every bug below either threw a real compile/runtime error against this data,
+or was confirmed by comparing metric output to a manual count. See `models/`
+for the corrected models and
+`case_review_reference/fct_intercom_conversations_daily_ASIS.sql` for the
+original.
 
 The as-given SQL was also run directly in Snowflake, with its four `ref()`s
-replaced by the untouched upstream tables in `RAW.INTERCOM`. Snowflake
+replaced by the untouched upstream tables in `SHINE_RAW.INTERCOM`. Snowflake
 reports one compile error at a time, so each was fixed in a scratch copy to
 reach the next. In the order Snowflake reported them: the trailing comma
 after the last CTE (#5), `date_trunc` with three arguments (#2), the

@@ -69,6 +69,10 @@ models:
       - name: _valid_from_utc
         data_tests:
           - not_null
+      - name: is_test_account
+        description: True for test accounts. The source leaves it NULL otherwise; stg_clients turns that into false.
+        data_tests:
+          - not_null
 
   - name: stg_dates
     columns:

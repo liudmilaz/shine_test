@@ -63,6 +63,7 @@ final as (
         coalesce(conversations_local.was_conversation_outside_office_hours, false) as is_outside_office_hours,
 
         -- client attributes as of the conversation (point in time)
+        -- never NULL per client (stg_clients); coalesce covers a missing client
         coalesce(clients_current.is_test_account, false) as is_test_account,
         coalesce(pit.active_plan, first_version.active_plan) as client_active_plan,
         coalesce(pit.has_active_contract_current, first_version.has_active_contract_current) as client_has_active_contract,

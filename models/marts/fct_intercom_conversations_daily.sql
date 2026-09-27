@@ -9,8 +9,9 @@
 --     always counted every row regardless of the condition
 --   - joins int_dim_clients_current (deduped to _is_latest) instead of
 --     the raw SCD2 dim_clients, avoiding a historical-version fan-out
---   - coalesce(is_test_account, false) so NULL flags don't silently drop
---     real clients via `!= true`
+--   - NULL test-account flags no longer drop real clients via `!= true`:
+--     stg_clients turns them into false, and the filter below also keeps
+--     conversations with no client match
 --   - date spine is a left join (was inner join), so days with zero
 --     chats survive; rate/average columns are left NULL on those days
 --     instead of coalesced to 0, since 0% reachability or a 0 avg rating
@@ -60,11 +61,13 @@ conversations_daily as (
 
     from conversations
     left join clients using (sev_client_id)
-    -- Excludes test accounts while keeping conversations with no client
-    -- match or a NULL flag. This does not turn the left join into an inner
-    -- join: coalesce maps the unmatched rows' NULL to false, so they pass.
-    -- The filter must stay in WHERE - moved into the ON clause (or applied
-    -- to clients before the join) it would keep test-account conversations.
+    -- Excludes test accounts. is_test_account is never NULL on a client
+    -- (stg_clients sets it to false), so the coalesce here only covers
+    -- conversations with no client match, whose NULL comes from the left
+    -- join itself - it keeps them, so the left join is not turned into an
+    -- inner join. The filter must stay in WHERE: moved into the ON clause
+    -- (or applied to clients before the join) it would keep test-account
+    -- conversations.
     where coalesce(clients.is_test_account, false) = false
 
     group by 1

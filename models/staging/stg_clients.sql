@@ -7,7 +7,12 @@
 -- The copies are identical, so which one survives doesn't matter; the
 -- order by only keeps the choice deterministic should two copies ever
 -- differ (the open-ended version wins).
-select * from {{ source('intercom_raw', 'src_clients') }}
+--
+-- is_test_account: the source only sets the flag when it is true (it is
+-- TRUE or NULL, never FALSE), so NULL means "not a test account" and is
+-- made explicit here once, instead of being coalesced in every model.
+select * replace (coalesce(is_test_account, false) as is_test_account)
+from {{ source('intercom_raw', 'src_clients') }}
 qualify row_number() over (
     partition by sev_client_id, _valid_from_utc
     order by _valid_to_utc desc nulls first

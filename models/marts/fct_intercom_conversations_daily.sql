@@ -11,7 +11,7 @@
 --     the raw SCD2 dim_clients, avoiding a historical-version fan-out
 --   - test accounts are excluded without the `!= true` trap (which dropped
 --     every client with a NULL flag): stg_clients turns NULL into false,
---     and int_dim_clients_current keeps real clients only
+--     and dim_clients (so int_dim_clients_current) holds real clients only
 --   - date spine is a left join (was inner join), so days with zero
 --     chats survive; rate/average columns are left NULL on those days
 --     instead of coalesced to 0, since 0% reachability or a 0 avg rating
@@ -60,7 +60,7 @@ conversations_daily as (
         avg(conversations.rating) as chat_avg_rating
 
     from conversations
-    -- Inner join on purpose: int_dim_clients_current holds only real clients,
+    -- Inner join on purpose: clients are real clients only (dim_clients),
     -- so this join is what excludes test-account conversations. (A left
     -- join would keep them - they'd just have no client match.) It would
     -- also drop a conversation whose client is missing altogether, but that

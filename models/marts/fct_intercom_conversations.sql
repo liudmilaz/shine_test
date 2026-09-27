@@ -3,6 +3,8 @@
 -- rates and averages are computed in the BI tool from sums, so they stay
 -- correct at any grain (day, week, month, plan, ...). No pre-computed
 -- ratios here on purpose: averaging them again would give wrong results.
+-- Real clients only: test accounts are excluded in dim_clients, and this
+-- table inner-joins the current client, like the daily fact.
 with
 
 conversations as (
@@ -21,15 +23,10 @@ client_first_versions as (
     qualify row_number() over (partition by sev_client_id order by _valid_from_utc) = 1
 ),
 
--- Current state, only for the test-account flag. This table keeps
--- test-account conversations (flagged) for self-service, so it reads the
--- latest version of every client from dim_clients: int_dim_clients_current
--- holds real clients only and would leave the flag empty for test accounts.
--- Using the current flag matches how the daily fact excludes them.
+-- Current version of each real client: the inner join to it is what keeps
+-- test-account conversations out, exactly as in the daily fact.
 clients_current as (
-    select sev_client_id, is_test_account
-    from client_versions
-    where _is_latest
+    select * from {{ ref('int_dim_clients_current') }}
 ),
 
 dates as (
@@ -68,8 +65,6 @@ final as (
         coalesce(conversations_local.was_conversation_outside_office_hours, false) as is_outside_office_hours,
 
         -- client attributes as of the conversation (point in time)
-        -- never NULL per client (stg_clients); coalesce covers a missing client
-        coalesce(clients_current.is_test_account, false) as is_test_account,
         coalesce(pit.active_plan, first_version.active_plan) as client_active_plan,
         coalesce(pit.has_active_contract_current, first_version.has_active_contract_current) as client_has_active_contract,
         coalesce(pit.is_small_settlement, first_version.is_small_settlement) as client_is_small_settlement,
@@ -91,7 +86,7 @@ final as (
         and conversations_local.created_at_utc < coalesce(pit._valid_to_utc, '9999-12-31'::timestamp_ntz)
     left join client_first_versions as first_version
         on first_version.sev_client_id = conversations_local.sev_client_id
-    left join clients_current
+    inner join clients_current
         on clients_current.sev_client_id = conversations_local.sev_client_id
     left join dates
         on dates.date_day = conversations_local.created_at_local::date

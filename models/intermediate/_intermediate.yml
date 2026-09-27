@@ -4,8 +4,8 @@ models:
   - name: int_dim_clients_current
     description: >
       The current (_is_latest) version of each real client: one row per
-      client, test accounts excluded. The unique test guarantees no client
-      has two "latest" rows.
+      client (test accounts are already excluded in dim_clients). The unique
+      test guarantees no client has two "latest" rows.
     columns:
       - name: sev_client_id
         data_tests:
@@ -22,13 +22,13 @@ models:
       - name: sev_client_id
         data_tests:
           - not_null
-          # Every conversation must belong to a known client (test accounts
-          # included, so this checks dim_clients, not the real-clients-only
-          # int_dim_clients_current). The daily fact inner-joins clients, so
-          # this is what stops a conversation from disappearing silently.
+          # Every conversation must belong to a known client. Checked against
+          # stg_clients, which still includes test accounts; dim_clients holds
+          # real clients only. The marts inner-join clients, so this is what
+          # stops a conversation from disappearing silently.
           - relationships:
               arguments:
-                to: ref('dim_clients')
+                to: ref('stg_clients')
                 field: sev_client_id
       - name: date_day
         data_tests:

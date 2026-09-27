@@ -2,7 +2,10 @@ version: 2
 
 models:
   - name: dim_clients
-    description: Client dimension with full SCD2 history (one row per client version).
+    description: >
+      Client dimension with full SCD2 history (one row per client version),
+      real clients only: test accounts are excluded here and remain in
+      stg_clients.
     columns:
       - name: sev_client_id
         data_tests:
@@ -25,12 +28,9 @@ models:
       reachability = sum(is_reached_within_60s) / sum(is_reply_eligible);
       average rating = avg(rating) (skips unrated chats);
       average handling time = avg(handling_seconds).
-      Filter is_test_account = false for customer-facing numbers.
+      Real clients only (test accounts are excluded in dim_clients).
       Dates are in Berlin time.
     data_tests:
-      - dbt_utils.equal_rowcount:
-          arguments:
-            compare_model: ref('int_intercom_conversation_metrics')
       # A conversation can only count as reached if it was eligible.
       - dbt_utils.expression_is_true:
           arguments:
@@ -61,8 +61,6 @@ models:
         description: >
           True when the conversation predates the client's recorded history,
           so the earliest known client version is used instead.
-      - name: is_test_account
-        description: Current test-account flag of the client. Exclude these rows for business reporting.
       - name: is_reply_eligible
         description: 1 unless the chat is still open with no agent reply yet (its reply time is not known).
         data_tests:

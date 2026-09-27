@@ -60,6 +60,11 @@ conversations_daily as (
 
     from conversations
     left join clients using (sev_client_id)
+    -- Excludes test accounts while keeping conversations with no client
+    -- match or a NULL flag. This does not turn the left join into an inner
+    -- join: coalesce maps the unmatched rows' NULL to false, so they pass.
+    -- The filter must stay in WHERE - moved into the ON clause (or applied
+    -- to clients before the join) it would keep test-account conversations.
     where coalesce(clients.is_test_account, false) = false
 
     group by 1

@@ -1,11 +1,23 @@
 version: 2
 
+# Where the sources are read from depends on the target:
+#   dev  -> SHINE_DEV.SRC.SRC_*        zero-copy clone of SHINE_RAW.INTERCOM,
+#                                      made by `dbt run-operation refresh_src`
+#   prod -> SHINE_RAW.INTERCOM.<raw>   read directly, under the names the
+#                                      tables were delivered with
+# SHINE_RAW is never modified: dbt connects as SHINE_DBT_USER, which can only
+# read it.
+
 sources:
   - name: intercom_raw
-    database: RAW
-    schema: INTERCOM
+    database: "{{ 'SHINE_RAW' if target.name == 'prod' else target.database }}"
+    schema: "{{ 'INTERCOM' if target.name == 'prod' else 'SRC' }}"
     tables:
       - name: stg_intercom_conversations
+        identifier: "{{ 'STG_INTERCOM_CONVERSATIONS' if target.name == 'prod' else 'SRC_INTERCOM_CONVERSATIONS' }}"
       - name: stg_intercom_conversation_parts
+        identifier: "{{ 'STG_INTERCOM_CONVERSATION_PARTS' if target.name == 'prod' else 'SRC_INTERCOM_CONVERSATION_PARTS' }}"
       - name: dim_clients
+        identifier: "{{ 'DIM_CLIENTS' if target.name == 'prod' else 'SRC_CLIENTS' }}"
       - name: dim_dates
+        identifier: "{{ 'DIM_DATES' if target.name == 'prod' else 'SRC_DATES' }}"

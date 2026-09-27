@@ -19,25 +19,26 @@ version: 2
 #   - It's a simulation: the case says these tables are given model
 #     outputs, so dim_clients/dim_dates now look "owned" by this project
 #     when upstream really built them.
-#   - Only the logical source names change. identifier: keeps pointing at
-#     the physical tables in RAW.INTERCOM (still named STG_*/DIM_*), because
-#     renaming them in Snowflake would break the main branch, the dev
-#     schema and the TEST_ENV clone, and RAW is treated as immutable.
 #
-# The database points at RAW by default; pass --vars '{raw_database: TEST_ENV}'
-# to read from the zero-copy clone instead.
+# Where the sources are read from depends on the target:
+#   dev  -> SHINE_DEV.SRC.SRC_*        zero-copy clone of SHINE_RAW.INTERCOM,
+#                                      made by `dbt run-operation refresh_src`
+#   prod -> SHINE_RAW.INTERCOM.<raw>   read directly; the raw tables keep the
+#                                      names they were delivered with (STG_*/DIM_*)
+# SHINE_RAW is never modified: dbt connects as SHINE_DBT_USER, which can only
+# read it.
 
 sources:
   - name: intercom_raw
-    database: "{{ var('raw_database', 'RAW') }}"
-    schema: INTERCOM
+    database: "{{ 'SHINE_RAW' if target.name == 'prod' else target.database }}"
+    schema: "{{ 'INTERCOM' if target.name == 'prod' else 'SRC' }}"
     tables:
       - name: src_intercom_conversations
-        identifier: STG_INTERCOM_CONVERSATIONS
+        identifier: "{{ 'STG_INTERCOM_CONVERSATIONS' if target.name == 'prod' else 'SRC_INTERCOM_CONVERSATIONS' }}"
       - name: src_intercom_conversation_parts
-        identifier: STG_INTERCOM_CONVERSATION_PARTS
+        identifier: "{{ 'STG_INTERCOM_CONVERSATION_PARTS' if target.name == 'prod' else 'SRC_INTERCOM_CONVERSATION_PARTS' }}"
       - name: src_clients
-        identifier: DIM_CLIENTS
+        identifier: "{{ 'DIM_CLIENTS' if target.name == 'prod' else 'SRC_CLIENTS' }}"
         data_tests:
           # Warns by design: the source sends each SCD2 version as several
           # exact copies. stg_clients removes them; this keeps the upstream
@@ -50,4 +51,4 @@ sources:
               config:
                 severity: warn
       - name: src_dates
-        identifier: DIM_DATES
+        identifier: "{{ 'DIM_DATES' if target.name == 'prod' else 'SRC_DATES' }}"

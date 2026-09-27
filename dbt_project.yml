@@ -23,11 +23,16 @@ vars:
   # with --vars to run it against the sample.
   anomaly_test_periods: 14
 
+# One schema per layer, same names in dev (SHINE_DEV) and prod
+# (SHINE_ANALYTICS_PROD) - see macros/generate_schema_name.sql.
 models:
   intercom_case:
     staging:
+      +schema: staging
       +materialized: view
     intermediate:
+      +schema: intermediate
       +materialized: view
     marts:
+      +schema: marts
       +materialized: table

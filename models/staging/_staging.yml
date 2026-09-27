@@ -47,6 +47,13 @@ models:
               arguments:
                 to: ref('stg_intercom_conversations')
                 field: conversation_id
+          # At most one first agent reply per conversation.
+          # int_intercom_conversation_metrics relies on this instead of
+          # aggregating, so a second flag fails here rather than silently
+          # doubling a conversation downstream.
+          - unique:
+              config:
+                where: "is_first_agent_reply"
       - name: created_at_utc
         data_tests:
           - not_null

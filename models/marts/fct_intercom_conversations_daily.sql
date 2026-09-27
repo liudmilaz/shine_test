@@ -66,6 +66,16 @@ conversations_daily as (
 
 ),
 
+-- First and last day with (non-test) chats: the spine's range.
+date_bounds as (
+
+    select
+        min(date_day) as start_date,
+        max(date_day) as end_date
+    from conversations_daily
+
+),
+
 spined as (
 
     select
@@ -81,9 +91,10 @@ spined as (
         conversations_daily.chat_avg_rating
 
     from dates
-    left join conversations_daily using (date_day)
-    where dates.date_day between (select min(date_day) from conversations_daily)
-                             and (select max(date_day) from conversations_daily)
+    inner join date_bounds
+        on dates.date_day between date_bounds.start_date and date_bounds.end_date
+    left join conversations_daily
+        on conversations_daily.date_day = dates.date_day
 
 )
 

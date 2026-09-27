@@ -16,6 +16,78 @@ models:
           - unique
           - not_null
 
+  - name: fct_intercom_conversations
+    description: >
+      One row per conversation - the self-service table for the BI tool.
+      It holds only additive building blocks; compute rates and averages in
+      the BI tool from sums, never by averaging stored ratios:
+      chat count = count(*);
+      reachability = sum(is_reached_within_60s) / sum(is_reply_eligible);
+      average rating = avg(rating) (skips unrated chats);
+      average handling time = avg(handling_seconds).
+      Filter is_test_account = false for customer-facing numbers.
+      Dates are in Berlin time.
+    data_tests:
+      - dbt_utils.equal_rowcount:
+          arguments:
+            compare_model: ref('int_intercom_conversation_metrics')
+      # A conversation can only count as reached if it was eligible.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_reached_within_60s <= is_reply_eligible"
+    columns:
+      - name: conversation_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: created_date_local
+        description: Calendar day the conversation started, in Europe/Berlin time.
+        data_tests:
+          - not_null
+      - name: created_week_start_local
+        description: Monday of the week the conversation started (Berlin time).
+        data_tests:
+          - not_null
+      - name: created_month_start_local
+        description: First day of the month the conversation started (Berlin time).
+        data_tests:
+          - not_null
+      - name: client_active_plan
+        description: >
+          The client's plan when the conversation happened (point in time from
+          the SCD2 history), not the current plan.
+      - name: is_client_version_estimated
+        description: >
+          True when the conversation predates the client's recorded history,
+          so the earliest known client version is used instead.
+      - name: is_test_account
+        description: Current test-account flag of the client. Exclude these rows for business reporting.
+      - name: is_reply_eligible
+        description: 1 unless the chat is still open with no agent reply yet (its reply time is not known).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_reached_within_60s
+        description: 1 if the first agent reply came within 60 seconds of the conversation starting.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_rated
+        description: 1 if the customer left a rating.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: first_reply_seconds
+        description: Seconds from conversation start to the first agent reply; empty when there was no reply.
+      - name: handling_seconds
+        description: Seconds from conversation start to its last close.
+      - name: rating
+        description: Customer rating; empty when unrated, so avg(rating) skips unrated chats.
+
   - name: fct_intercom_conversations_daily
     description: Daily aggregation of in-app chat performance metrics.
     data_tests:

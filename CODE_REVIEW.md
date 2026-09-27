@@ -131,10 +131,14 @@ all**, because of #10.
     rows**. Fix: `where coalesce(clients.is_test_account, false) = false`.
 
 11. **`combined.chat_first_response_60_sec_count / coalesce(combined.chat_count,
-   0)`** — beyond the alias-reference syntax error (#3), dividing by
-   `coalesce(chat_count, 0)` will raise a division-by-zero error on any
-   day with zero conversations, rather than a safe `NULL`. Should be
-   `nullif(chat_count, 0)` in the denominator.
+    0)`** — beyond the alias-reference syntax error (#3), the `coalesce`
+    does nothing. `conversations_daily` groups rows that exist, so each
+    day's `count(*)` is at least 1 and never `NULL`; a day with no
+    conversations has no row here at all and only appears later, in the
+    date spine. So the query can't divide by zero as written - but the
+    `coalesce(..., 0)` shows the intent was the opposite of safe: had a 0
+    ever reached the denominator, it would raise a division-by-zero error.
+    The correct guard is `nullif(chat_count, 0)`, which returns `NULL`.
 
 12. **`coalesce(conversations.rating, 0) as rating`** applied *before*
     `avg(rating)` downstream — unrated conversations become a rating of
@@ -164,23 +168,49 @@ all**, because of #10.
     correctly, neither column is referenced anywhere downstream of
     `combined`; they're computed and then dropped.
 
+15. **Inverted subtraction for the inside-hours count** —
+    `chats_outside_business_hours_count - chat_count as
+    chats_inside_business_hours_count` subtracts the total from the part.
+    Inside-hours chats are the total minus the outside-hours ones, so the
+    operands are the wrong way round and the result is always zero or
+    negative. Today #6 hides it (the outside-hours count equals the total,
+    so the result is 0); once #6 is fixed, a day with 30 chats, 10 of them
+    outside hours, shows `10 - 30 = -20`. Fix: `chat_count -
+    chats_outside_business_hours_count`, or count inside-hours chats
+    directly. A test asserting inside + outside = total catches it.
+
+16. **Inner join to `clients` drops conversations without a client** —
+    `join clients using (sev_client_id)` is an inner join, so a
+    conversation whose `sev_client_id` is `NULL` or has no row in
+    `dim_clients` disappears from every count without any warning. It has
+    no effect on this sample (every conversation has a client), but
+    nothing in the model would notice if one didn't. Fix: either left-join
+    and decide explicitly how such conversations are reported, or keep the
+    inner join and add a `relationships` test on `sev_client_id` so a
+    missing client fails the build instead of shrinking the numbers (the
+    remodel does the latter).
+
 ## Subtask 2 — Modeling approach feedback
 
-**Grain discipline.** The core issue behind several bugs above (#6, #7,
-#8, #11) is that the model does everything in one flat `combined` CTE at
-conversation-*part* grain, then tries to compute conversation- and
-day-level metrics on top of it in a single pass. Splitting this into
-clear layers fixes it structurally, not just patches the symptoms:
+**Grain discipline.** Two of the bugs above come directly from grain: the
+model does everything in one flat `combined` CTE at conversation-*part*
+grain, so `chat_count` counts messages (#8), and the first-reply time
+exists only on one message row and is coalesced to 0 on all the others
+(#7). Splitting this into clear layers fixes those structurally:
 - an intermediate model at **conversation grain** (one row per
-  `conversation_id`) that resolves `first_agent_replied_at_utc` via an
-  aggregate (`min(created_at_utc) where is_first_agent_reply`) rather
-  than a join that fans out, and computes elapsed times there
+  `conversation_id`) that takes `first_agent_replied_at_utc` from the one
+  flagged part (`where is_first_agent_reply`) instead of a join that fans
+  out, and computes elapsed times there
 - the daily fact model aggregates *that*, so `count(*)` is guaranteed to
   mean "count of conversations", not "count of whatever the last join
   happened to multiply the grain by"
 
-This is the classic staging → intermediate → mart shape and would have
-made bugs #6–#11 much harder to introduce in the first place.
+This is the classic staging → intermediate → mart shape. It does not by
+itself prevent the other logic bugs - `count` vs `sum` (#6), the SCD2 join
+(#9), `!= true` against `NULL` (#10) or the denominator (#11) are wrong at
+any grain. What layering does is give each step one grain that can be
+tested on its own, and those tests (unique keys, inside + outside =
+total, relationships) are what catch the rest.
 
 **Defensive dimension joins.** Never join a dimension "using" its
 business key alone if the dimension is SCD-tracked, even one flagged with
@@ -191,13 +221,15 @@ clients" model would catch this immediately in CI rather than silently
 inflating a downstream count.
 
 **NULL vs. zero is a modeling decision, not a formatting detail.** The
-original model coalesces every rate/average to `0` at the end, including
-on days with zero chats. A day with *no conversations* isn't "0%
-reachability" or "a 0 average rating" — those are meaningless / actively
-misleading numbers for a stakeholder skimming a dashboard. Only the
-*count* columns should default to 0 on empty days (there really were zero
-conversations); rate and average columns should stay `NULL` (there is no
-rate to report).
+original model coalesces every rate and average to `0` in `spined`. As
+written that is dead code: its inner join (#13) drops days with no chats
+entirely, so no row ever has a `NULL` to replace. The problem appears as
+soon as #13 is fixed with a left join and the coalesces are left in:
+empty days would then show "0% reachability" and "a 0 average rating",
+which are meaningless and actively misleading for a stakeholder skimming a
+dashboard. So the two have to be fixed together: only the *count* columns
+should default to 0 on empty days (there really were zero conversations);
+rate and average columns should stay `NULL` (there is no rate to report).
 
 **Bound the date spine to something meaningful.** `dim_dates` spans 2020
 through the multi-year present. Left-joining the entire spine into a

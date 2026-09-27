@@ -3,9 +3,9 @@ version: 2
 models:
   - name: int_dim_clients_current
     description: >
-      dim_clients deduped to exactly one "current" row per client.
-      _is_latest alone isn't safe to trust (see CODE_REVIEW.md) -
-      the unique test below is what would have caught that in CI.
+      The current (_is_latest) version of each real client: one row per
+      client, test accounts excluded. The unique test guarantees no client
+      has two "latest" rows.
     columns:
       - name: sev_client_id
         data_tests:
@@ -22,11 +22,13 @@ models:
       - name: sev_client_id
         data_tests:
           - not_null
-          # The fct model left-joins clients so orphans aren't dropped;
-          # this surfaces them instead of letting them pass silently.
+          # Every conversation must belong to a known client (test accounts
+          # included, so this checks dim_clients, not the real-clients-only
+          # int_dim_clients_current). The daily fact inner-joins clients, so
+          # this is what stops a conversation from disappearing silently.
           - relationships:
               arguments:
-                to: ref('int_dim_clients_current')
+                to: ref('dim_clients')
                 field: sev_client_id
       - name: date_day
         data_tests:

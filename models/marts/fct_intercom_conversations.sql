@@ -21,10 +21,15 @@ client_first_versions as (
     qualify row_number() over (partition by sev_client_id order by _valid_from_utc) = 1
 ),
 
--- Current state, only for the test-account flag: the daily fact excludes
--- test accounts by their current flag, and this table must match it.
+-- Current state, only for the test-account flag. This table keeps
+-- test-account conversations (flagged) for self-service, so it reads the
+-- latest version of every client from dim_clients: int_dim_clients_current
+-- holds real clients only and would leave the flag empty for test accounts.
+-- Using the current flag matches how the daily fact excludes them.
 clients_current as (
-    select * from {{ ref('int_dim_clients_current') }}
+    select sev_client_id, is_test_account
+    from client_versions
+    where _is_latest
 ),
 
 dates as (

@@ -9,9 +9,9 @@
 --     always counted every row regardless of the condition
 --   - joins int_dim_clients_current (deduped to _is_latest) instead of
 --     the raw SCD2 dim_clients, avoiding a historical-version fan-out
---   - NULL test-account flags no longer drop real clients via `!= true`:
---     stg_clients turns them into false, and the filter below also keeps
---     conversations with no client match
+--   - test accounts are excluded without the `!= true` trap (which dropped
+--     every client with a NULL flag): stg_clients turns NULL into false,
+--     and int_dim_clients_current keeps real clients only
 --   - date spine is a left join (was inner join), so days with zero
 --     chats survive; rate/average columns are left NULL on those days
 --     instead of coalesced to 0, since 0% reachability or a 0 avg rating
@@ -20,8 +20,8 @@
 --     dragging chat_avg_rating down for every unrated conversation
 --   - date spine is bounded to the observed (non-test) conversation range
 --     instead of enumerating the full multi-year dim_dates table
---   - left join to clients, so a conversation with no current client row
---     is kept rather than silently dropped (caught by a relationships test)
+--   - a conversation with no client at all can't be dropped silently: the
+--     relationships test on int_intercom_conversation_metrics fails first
 --   - chats still open with no agent reply are left out of reachability,
 --     so recent days aren't understated and then revised upward later
 
@@ -60,15 +60,13 @@ conversations_daily as (
         avg(conversations.rating) as chat_avg_rating
 
     from conversations
-    left join clients using (sev_client_id)
-    -- Excludes test accounts. is_test_account is never NULL on a client
-    -- (stg_clients sets it to false), so the coalesce here only covers
-    -- conversations with no client match, whose NULL comes from the left
-    -- join itself - it keeps them, so the left join is not turned into an
-    -- inner join. The filter must stay in WHERE: moved into the ON clause
-    -- (or applied to clients before the join) it would keep test-account
-    -- conversations.
-    where coalesce(clients.is_test_account, false) = false
+    -- Inner join on purpose: int_dim_clients_current holds only real clients,
+    -- so this join is what excludes test-account conversations. (A left
+    -- join would keep them - they'd just have no client match.) It would
+    -- also drop a conversation whose client is missing altogether, but that
+    -- can't happen silently: the relationships test on
+    -- int_intercom_conversation_metrics.sev_client_id fails the build first.
+    inner join clients using (sev_client_id)
 
     group by 1
 

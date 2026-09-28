@@ -72,6 +72,13 @@ all**, because of #10.
 
 ### Logical / functional mistakes (compiles fine elsewhere, produces wrong numbers)
 
+**Data quality first.** Several of these fixes are only correct once the
+flags they read are clean. `was_conversation_outside_office_hours` and
+`is_test_account` arrive as TRUE or NULL, never FALSE. So before fixing
+#6, #10 and #15, the flags were validated against the raw data and
+cleansed in staging (see "Data quality of the flags behind the metrics"
+below). Each affected mistake says what it depends on.
+
 6. **`count(case when <cond> then 1 else 0 end)`** (×2: outside-hours
    count, 60-second-reply count) — `COUNT()` counts non-NULL values. The
    `else 0` branch means *every* row produces a non-NULL value (0 or 1),
@@ -80,6 +87,14 @@ all**, because of #10.
    would equal `chat_count` on every single day. Fix: drop the `else`
    (so non-matching rows are NULL and excluded) or use `sum(case when
    <cond> then 1 else 0 end)`.
+   **Data quality first:** `sum(...)` only gives the true outside-hours
+   count if the flag means what it says. The source flag is TRUE (10) or
+   NULL (90), so a NULL could mean "inside hours" or "unknown". It was
+   recalculated from `created_at_utc` (09:00-18:00 CEST, Mon-Fri), which
+   agrees with the source on all 100 chats, and it is cleansed in
+   `stg_intercom_conversations`: never NULL now. The 60-second count
+   depends on `is_first_agent_reply`, verified unique per conversation;
+   who sent the reply can't be verified without an author column.
 
 7. **`coalesce(time_to_first_agent_reply, 0)` turns "no reply on this row"
    into "replied in 0 seconds"** — `first_agent_replied_at_utc` is a
@@ -93,6 +108,9 @@ all**, because of #10.
    `chat_reachability` would come out near 97% instead of the true 0%.
    Fix: resolve the first reply per conversation (`min(created_at_utc)
    where is_first_agent_reply`) and leave a missing reply as `NULL`.
+   **Data quality first:** this relies on `is_first_agent_reply` flagging
+   at most one part per conversation, never after the close. Both were
+   verified on the raw data, and a `unique` test guards the first.
 
 8. **Wrong grain: `conversations join conversation_parts using
    (conversation_id)`** is one-to-many (one conversation, many message
@@ -148,6 +166,10 @@ all**, because of #10.
     as `NULL` for unrated conversations and only coalescing the *count*
     metrics (never the rating itself) changes `chat_avg_rating` materially
     on days with any unrated chats.
+    **Data quality first:** skipping NULLs is right only because a NULL
+    rating genuinely means "unrated", not missing data. That was verified:
+    ratings are in the range 1-5, and exactly the 41 rated conversations
+    have a `conversation_rating_changed` part.
 
 13. **`from dates join conversations_daily using (date_day)`** — an
     `INNER JOIN`, despite the comment directly above it saying "Fill up
@@ -178,6 +200,10 @@ all**, because of #10.
     outside hours, shows `10 - 30 = -20`. Fix: `chat_count -
     chats_outside_business_hours_count`, or count inside-hours chats
     directly. A test asserting inside + outside = total catches it.
+    **Data quality first:** `chat_count - outside` equals the inside-hours
+    count only if every chat is exactly one of the two, i.e. the flag is
+    two-valued and never NULL. That holds once the flag is recalculated in
+    staging (see #6).
 
 16. **Inner join to `clients` drops conversations without a client** —
     `join clients using (sev_client_id)` is an inner join, so a

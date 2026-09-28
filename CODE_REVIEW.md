@@ -190,6 +190,42 @@ all**, because of #10.
     missing client fails the build instead of shrinking the numbers (the
     remodel does the latter).
 
+### Data quality of the flags behind the metrics
+
+The upstream outputs are used as given: `SHINE_RAW` is never modified.
+Cleansing happens in the staging layer this project owns, and only for
+flags that feed a metric of `fct_intercom_conversations_daily`.
+
+| Metric | Flag it depends on | Raw data quality | Action |
+|---|---|---|---|
+| outside / inside business hours counts | `was_conversation_outside_office_hours` | TRUE 10 / NULL 90, never FALSE | Recalculated in `stg_intercom_conversations` |
+| `chat_count` and every metric (filter) | `is_test_account` | TRUE / NULL only | NULL -> false in `stg_clients` |
+| `chat_count` (client join) | `_is_latest` | Correct, but 195 exact duplicate rows | Deduplicated in `stg_clients` |
+| first response in 60 s, reachability | `is_first_agent_reply` | At most 1 per chat, never after the close; the 10 chats without one are out-of-hours auto-closes | None - can't be verified without an author column |
+| average rating | `rating` | 1-5; NULL = unrated | None |
+| average handling time | `created_at_utc`, `last_closed_at_utc` | Consistent order; no reopened chats | None |
+
+**Office hours are recalculated, not coalesced.** A NULL flag could mean
+"inside office hours" or "unknown". `stg_intercom_conversations` derives
+the flag from `created_at_utc` and overwrites the source value, keeping it
+as `was_conversation_outside_office_hours_source` for audit. Assumption:
+`created_at_utc` is the base column, and office hours are 09:00-18:00 CEST,
+Monday to Friday, for all markets (Copenhagen, Paris, Amsterdam, Berlin,
+Gdansk). `stg_dates` holds the UTC -> CEST conversion
+(`cest_utc_offset_hours`, `office_opens_at_utc`, `office_closes_at_utc`),
+so it flows into `dim_dates`. A fixed CEST (UTC+2) reproduces the source
+flag on all 100 chats; the daylight-saving-aware Europe/Berlin zone (UTC+1
+in January) would disagree on 3. The warn-level test
+`assert_office_hours_recalc_matches_source` reports any disagreement.
+
+**With clean flags, the task's own formulas are correct.** The fixed model
+therefore keeps the task's calculations and changes only the bugs:
+inside = `chat_count - outside` (#15, operands swapped back), and
+reachability = 60-second replies / `nullif(chat_count, 0)` (#11). Leaving
+still-open chats out of reachability changes the metric's definition, so
+it appears only in the subtask 2 models. On the sample, every daily metric
+is identical before and after the cleansing.
+
 ## Subtask 2 — Modeling approach feedback
 
 **Grain discipline.** Two of the bugs above come directly from grain: the

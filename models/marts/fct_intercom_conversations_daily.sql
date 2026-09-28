@@ -22,8 +22,13 @@
 --     instead of enumerating the full multi-year dim_dates table
 --   - a conversation with no client at all can't be dropped silently: the
 --     relationships test on int_intercom_conversation_metrics fails first
---   - chats still open with no agent reply are left out of reachability,
---     so recent days aren't understated and then revised upward later
+--   - the metric formulas are otherwise the task's own: inside = chat_count
+--     - outside (operands in the right order), reachability = 60-second
+--     replies / chat_count. They are correct as written because the flags
+--     are cleansed in staging (was_conversation_outside_office_hours
+--     recalculated, is_test_account NULL -> false). Leaving still-open
+--     chats out of reachability is a definition change, so it lives in the
+--     subtask 2 models (fct_intercom_conversations, agg_*), not here.
 
 with
 
@@ -44,16 +49,19 @@ conversations_daily as (
     select
         conversations.date_day,
 
+        -- Same calculations as the task, with only the bugs fixed. The
+        -- office-hours flag is recalculated in staging and never NULL, so it
+        -- needs no coalesce here.
         count(*) as chat_count,
         sum(case when conversations.was_conversation_outside_office_hours then 1 else 0 end)
             as chats_outside_business_hours_count,
-        sum(case when not coalesce(conversations.was_conversation_outside_office_hours, false) then 1 else 0 end)
+        count(*) - sum(case when conversations.was_conversation_outside_office_hours then 1 else 0 end)
             as chats_inside_business_hours_count,
 
         sum(case when conversations.time_to_first_agent_reply_seconds <= 60 then 1 else 0 end)
             as chat_first_response_60_sec_count,
         sum(case when conversations.time_to_first_agent_reply_seconds <= 60 then 1 else 0 end)
-            / nullif(sum(case when not conversations.is_awaiting_first_reply then 1 else 0 end), 0)
+            / nullif(count(*), 0)
             as chat_reachability,
 
         avg(conversations.time_to_last_close_seconds) as chat_avg_handling_time_seconds,

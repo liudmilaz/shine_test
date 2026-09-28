@@ -82,7 +82,7 @@ final as (
         -- conversation attributes (degenerate dimensions)
         conversations.status_label,
         conversations.is_currently_open,
-        coalesce(conversations.was_conversation_outside_office_hours, false) as is_outside_office_hours,
+        conversations.was_conversation_outside_office_hours as is_outside_office_hours,
         conversation_client_version.is_client_version_estimated,
 
         -- additive measures (sum / count them in the BI tool)

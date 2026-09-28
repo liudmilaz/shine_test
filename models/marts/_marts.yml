@@ -6,7 +6,18 @@ models:
       Client dimension with full SCD2 history (one row per client version),
       real clients only: test accounts are excluded here and remain in
       stg_clients.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - sev_client_id
+              - _valid_from_utc
     columns:
+      - name: client_version_key
+        description: Surrogate key of one client version, a hash of sev_client_id and _valid_from_utc.
+        data_tests:
+          - unique
+          - not_null
       - name: sev_client_id
         data_tests:
           - not_null
@@ -21,7 +32,10 @@ models:
 
   - name: fct_intercom_conversations
     description: >
-      One row per conversation - the self-service table for the BI tool.
+      One row per conversation - the fact table of a star schema for the BI
+      tool (Omni). Client attributes are joined from dim_clients (as of the
+      conversation via client_version_key, or current via sev_client_id and
+      _is_latest), calendar attributes from dim_dates via created_date_utc.
       It holds only additive building blocks; compute rates and averages in
       the BI tool from sums, never by averaging stored ratios:
       chat count = count(*);
@@ -29,7 +43,10 @@ models:
       average rating = avg(rating) (skips unrated chats);
       average handling time = avg(handling_seconds).
       Real clients only (test accounts are excluded in dim_clients).
-      Dates are in Berlin time.
+      All times are UTC; Omni converts created_at_utc to the viewer's timezone.
+    config:
+      contract:
+        enforced: true
     data_tests:
       # A conversation can only count as reached if it was eligible.
       - dbt_utils.expression_is_true:
@@ -37,54 +54,92 @@ models:
             expression: "is_reached_within_60s <= is_reply_eligible"
     columns:
       - name: conversation_id
+        data_type: varchar
         description: Primary key.
         data_tests:
           - unique
           - not_null
-      - name: created_date_local
-        description: Calendar day the conversation started, in Europe/Berlin time.
+      - name: sev_client_id
+        data_type: varchar
+        description: Natural key of the client; join to dim_clients where _is_latest for the current client.
         data_tests:
           - not_null
-      - name: created_week_start_local
-        description: Monday of the week the conversation started (Berlin time).
+      - name: client_version_key
+        data_type: varchar
+        description: The client version valid when the conversation started (point in time).
         data_tests:
           - not_null
-      - name: created_month_start_local
-        description: First day of the month the conversation started (Berlin time).
+          - relationships:
+              arguments:
+                to: ref('dim_clients')
+                field: client_version_key
+      - name: author_contact_id
+        data_type: varchar
+      - name: agent_assignee_id
+        data_type: varchar
+      - name: created_at_utc
+        data_type: timestamp_ntz
+        description: When the conversation started, UTC. The time dimension for the BI tool.
         data_tests:
           - not_null
-      - name: client_active_plan
+      - name: created_date_utc
+        data_type: date
         description: >
-          The client's plan when the conversation happened (point in time from
-          the SCD2 history), not the current plan.
+          UTC calendar day the conversation started; join key to dim_dates.
+          Set convert_tz false on it in Omni - it is a date, not a timestamp.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_day
+      - name: status_label
+        data_type: varchar
+      - name: is_currently_open
+        data_type: boolean
+      - name: is_outside_office_hours
+        data_type: boolean
       - name: is_client_version_estimated
+        data_type: boolean
         description: >
-          True when the conversation predates the client's recorded history,
-          so the earliest known client version is used instead.
+          True when no client version was valid when the conversation started
+          (it predates the recorded history, or falls in a gap), so the
+          nearest version is used instead.
+        data_tests:
+          - not_null
       - name: is_reply_eligible
+        data_type: number
         description: 1 unless the chat is still open with no agent reply yet (its reply time is not known).
         data_tests:
           - accepted_values:
               arguments:
                 values: [0, 1]
       - name: is_reached_within_60s
+        data_type: number
         description: 1 if the first agent reply came within 60 seconds of the conversation starting.
         data_tests:
           - accepted_values:
               arguments:
                 values: [0, 1]
+      - name: first_reply_seconds
+        data_type: number
+        description: Seconds from conversation start to the first agent reply; empty when there was no reply.
+      - name: first_close_seconds
+        data_type: number
+        description: Seconds from conversation start to its first close.
+      - name: handling_seconds
+        data_type: number
+        description: Seconds from conversation start to its last close.
+      - name: rating
+        data_type: number
+        description: Customer rating; empty when unrated, so avg(rating) skips unrated chats.
       - name: is_rated
+        data_type: number
         description: 1 if the customer left a rating.
         data_tests:
           - accepted_values:
               arguments:
                 values: [0, 1]
-      - name: first_reply_seconds
-        description: Seconds from conversation start to the first agent reply; empty when there was no reply.
-      - name: handling_seconds
-        description: Seconds from conversation start to its last close.
-      - name: rating
-        description: Customer rating; empty when unrated, so avg(rating) skips unrated chats.
 
   - name: fct_intercom_conversations_daily
     description: Daily aggregation of in-app chat performance metrics.

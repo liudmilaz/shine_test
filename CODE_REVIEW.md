@@ -244,6 +244,46 @@ conversations" — worth a `not_null` + a documented grain in a
 chats_outside_business_hours_count = chat_count`, which is exactly the
 kind of regression the bugs above would have been caught by.
 
+**Two lineages: fix the deliverable, remodel next to it.** Subtask 1 says
+"the evaluation of the modelling is not intended here", so the fixes above
+keep `fct_intercom_conversations_daily` as it was delivered: the same
+name, the same grain, the same consumers. Dropping or renaming it would be
+a breaking change. The remodel is this subtask's answer, and it sits next
+to the deliverable instead of replacing it:
+
+- `fct_intercom_conversations` - one row per conversation, the fact of a
+  star schema with `dim_clients` and `dim_dates`. Every metric is defined
+  here, once, as an additive building block (0/1 flags, seconds, rating).
+  Client attributes are not copied onto the fact: `client_version_key`
+  points at the `dim_clients` version valid when the chat started. When
+  no version was valid, the nearest one is used and
+  `is_client_version_estimated` is set. The contract is enforced, because
+  the BI tool depends on the column set.
+- `agg_intercom_conversations_daily` - a rollup of that fact, one row per
+  UTC day. It only sums the fact and stores the numerator and denominator
+  next to each ratio, so a week or a month is `sum / sum`, never an
+  average of daily ratios. `tests/assert_agg_daily_reconciles_to_fct.sql`
+  fails if any day's totals differ from the fact. On the sample, both
+  daily tables return identical numbers: 8 days, 0 differences.
+
+Why not keep only the daily table? It works for regular reporting, and
+it's one click to export. But a day-grain table with finished ratios
+answers exactly one question. The predictable follow-up is weekly,
+monthly, yearly, by plan - each one another pre-aggregated table with its
+own copy of the metric logic. And daily ratios can't be rolled up into a
+correct weekly ratio. The conversation-grain fact answers all of those
+from one place.
+
+**Times in UTC; the BI tool converts.** Both tables store UTC
+(`created_at_utc`, `created_date_utc`). The BI tool (Omni) converts
+timestamps from the connection's database timezone (UTC) to the viewer's
+timezone at query time. A date that was already shifted to Berlin time
+could not be converted again, and it would disagree with a UTC daily
+table. In Omni, time is grouped on `created_at_utc`, and
+`convert_tz: false` is set on the date columns. The one limit: a finished
+daily aggregate can't be re-bucketed into another timezone, so
+Berlin-day reporting has to come from the conversation fact.
+
 **Suggested improvements, if extending this further:**
 - add `schema.yml` docs + tests (`unique`/`not_null` on `date_day`,
   relationships tests from the intermediate model back to

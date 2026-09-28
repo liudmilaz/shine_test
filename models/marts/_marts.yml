@@ -175,3 +175,31 @@ models:
       - name: chat_first_response_60_sec_count
         data_tests:
           - not_null
+
+  - name: agg_intercom_conversations_daily
+    description: >
+      Daily rollup of fct_intercom_conversations (subtask 2 proposal): one row
+      per UTC calendar day, days without chats included. Every metric is
+      defined in the conversation-grain fact and only summed here. Roll up
+      to week/month with sum(numerator) / sum(denominator):
+      reachability = sum(reached_within_60s_count) / sum(reply_eligible_count);
+      average rating = sum(rating_sum) / sum(rated_count);
+      average handling time = sum(handling_seconds_sum) / sum(handled_count).
+      The ratio columns are for one-day reads only - never average them.
+    columns:
+      - name: date_day
+        description: UTC calendar day.
+        data_tests:
+          - unique
+          - not_null
+      - name: chat_count
+        data_tests:
+          - not_null
+      - name: reply_eligible_count
+        data_tests:
+          - not_null
+      - name: reached_within_60s_count
+        data_tests:
+          - not_null
+      - name: chat_reachability
+        description: reached_within_60s_count / reply_eligible_count for this day only; NULL when nothing was eligible.

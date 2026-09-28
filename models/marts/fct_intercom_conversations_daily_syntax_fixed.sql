@@ -9,27 +9,33 @@
 -- Every logic bug is deliberately left in. With this data the model returns
 -- no rows: `is_test_account != true` also drops clients whose flag is NULL,
 -- and every real client's flag is NULL.
+--
+-- It reads the sources as delivered, not the stg_/dim_ models: those are
+-- cleansed (deduplicated clients, is_test_account NULL -> false, the
+-- office-hours flag recalculated), which would hide the original bugs.
+-- The ref() quoting fix still applies to the as-given file; here the four
+-- upstream tables are simply read through source().
 
 with
 
 -- chats
 conversations as (
-    select * from {{ ref('stg_intercom_conversations') }}
+    select * from {{ source('intercom_raw', 'src_intercom_conversations') }}
 ),
 
 -- chat messages
 conversation_parts as (
-    select * from {{ ref('stg_intercom_conversation_parts') }}
+    select * from {{ source('intercom_raw', 'src_intercom_conversation_parts') }}
 ),
 
 -- clients
 clients as (
-    select * from {{ ref('dim_clients') }}
+    select * from {{ source('intercom_raw', 'src_clients') }}
 ),
 
 -- dates
 dates as (
-    select * from {{ ref('dim_dates') }}
+    select * from {{ source('intercom_raw', 'src_dates') }}
 ),
 
 

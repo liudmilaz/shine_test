@@ -1,0 +1,11 @@
+{
+    "dbt.perspectiveTheme": "Vintage",
+    "files.associations": {
+        "**/models/**/*.sql": "jinja-sql",
+        "**/macros/**/*.sql": "jinja-sql",
+        "**/tests/**/*.sql": "jinja-sql",
+        "**/case_review_reference/*.sql": "jinja-sql",
+        "**/target/**/*.sql": "snowflake-sql",
+        "**/analyses/**/*.sql": "snowflake-sql"
+    }
+}

@@ -1,10 +1,30 @@
 version: 2
 
+# Simulated source layer. The case ships these four tables as outputs of
+# upstream dbt models (stg_*/dim_*). Here we treat them as raw source data
+# instead, so the project shows the full layering:
+#
+#   source src_<entity>  ->  stg_<entity>  ->  dim_<entity> / fct_*
+#
+# Trade-offs of this decision:
+#   + Every layer has one job: sources are raw, stg_ renames/casts 1:1 with
+#     a source, dim_/fct_ hold business entities. dim_ models no longer sit
+#     in staging/, which misrepresented them as source-conformed.
+#   + The four model names the reviewed fct model refs (stg_intercom_*,
+#     dim_clients, dim_dates) are unchanged, so it and the as-given _ASIS
+#     file still resolve - no breaking change for their consumers.
+#   - stg_clients and stg_dates are pure passthroughs today: two extra
+#     views that add no logic, only structure. Worth it for a real source
+#     that needs renaming/casting; overhead for this static sample.
+#   - It's a simulation: the case says these tables are given model
+#     outputs, so dim_clients/dim_dates now look "owned" by this project
+#     when upstream really built them.
+#
 # Where the sources are read from depends on the target:
 #   dev  -> SHINE_DEV.SRC.SRC_*        zero-copy clone of SHINE_RAW.INTERCOM,
 #                                      made by `dbt run-operation refresh_src`
-#   prod -> SHINE_RAW.INTERCOM.<raw>   read directly, under the names the
-#                                      tables were delivered with
+#   prod -> SHINE_RAW.INTERCOM.<raw>   read directly; the raw tables keep the
+#                                      names they were delivered with (STG_*/DIM_*)
 # SHINE_RAW is never modified: dbt connects as SHINE_DBT_USER, which can only
 # read it.
 
@@ -13,11 +33,22 @@ sources:
     database: "{{ 'SHINE_RAW' if target.name == 'prod' else target.database }}"
     schema: "{{ 'INTERCOM' if target.name == 'prod' else 'SRC' }}"
     tables:
-      - name: stg_intercom_conversations
+      - name: src_intercom_conversations
         identifier: "{{ 'STG_INTERCOM_CONVERSATIONS' if target.name == 'prod' else 'SRC_INTERCOM_CONVERSATIONS' }}"
-      - name: stg_intercom_conversation_parts
+      - name: src_intercom_conversation_parts
         identifier: "{{ 'STG_INTERCOM_CONVERSATION_PARTS' if target.name == 'prod' else 'SRC_INTERCOM_CONVERSATION_PARTS' }}"
-      - name: dim_clients
+      - name: src_clients
         identifier: "{{ 'DIM_CLIENTS' if target.name == 'prod' else 'SRC_CLIENTS' }}"
-      - name: dim_dates
+        data_tests:
+          # Warns by design: the source sends each SCD2 version as several
+          # exact copies. stg_clients removes them; this keeps the upstream
+          # issue visible so it can be raised with the data's owner.
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns:
+                  - sev_client_id
+                  - _valid_from_utc
+              config:
+                severity: warn
+      - name: src_dates
         identifier: "{{ 'DIM_DATES' if target.name == 'prod' else 'SRC_DATES' }}"

@@ -1,0 +1,3 @@
+# Personal scratch SQL, run in the Snowflake extension - not part of the dbt project.
+# Without this, a broken {{ }} in any scratch file stops every dbt command.
+analyses/

@@ -15,12 +15,23 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+vars:
+  # dbt_date.now(), used by dbt_expectations' moving-stdev anomaly test.
+  "dbt_date:time_zone": "UTC"
+  # How many recent periods the anomaly test checks. The sample data ends
+  # 2025-01-08, so the default window finds nothing; pass a larger value
+  # with --vars to run it against the sample.
+  anomaly_test_periods: 14
+
 # One schema per layer, same names in dev (SHINE_DEV) and prod
 # (SHINE_ANALYTICS_PROD) - see macros/generate_schema_name.sql.
 models:
   intercom_case:
     staging:
       +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
       +materialized: view
     marts:
       +schema: marts

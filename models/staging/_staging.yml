@@ -1,0 +1,112 @@
+version: 2
+
+# Recency tests are severity: warn. The case's sample data stops at
+# 2025-01-08, so they will warn on every run here - in production they'd
+# flag a stalled Intercom sync.
+
+models:
+  - name: stg_intercom_conversations
+    data_tests:
+      - dbt_utils.recency:
+          arguments:
+            datepart: day
+            field: created_at_utc
+            interval: 1
+          config:
+            severity: warn
+    columns:
+      - name: conversation_id
+        data_tests:
+          - unique
+          - not_null
+      - name: sev_client_id
+        data_tests:
+          - not_null
+      - name: created_at_utc
+        description: When the conversation started, UTC. The base column for the office-hours flag.
+        data_tests:
+          - not_null
+      - name: was_conversation_outside_office_hours
+        description: >
+          Recalculated in staging from created_at_utc, overwriting the source
+          value: true unless the chat started Monday-Friday between 09:00 and
+          18:00 CEST (UTC+2; conversion in stg_dates). Never NULL.
+        data_tests:
+          - not_null
+      - name: was_conversation_outside_office_hours_source
+        description: The source value, kept for audit. TRUE or NULL only (NULL meant "inside office hours").
+
+  - name: stg_intercom_conversation_parts
+    data_tests:
+      - dbt_utils.recency:
+          arguments:
+            datepart: day
+            field: created_at_utc
+            interval: 1
+          config:
+            severity: warn
+    columns:
+      - name: conversation_part_id
+        data_tests:
+          - unique
+          - not_null
+      - name: conversation_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_intercom_conversations')
+                field: conversation_id
+          # At most one first agent reply per conversation.
+          # int_intercom_conversation_metrics relies on this instead of
+          # aggregating, so a second flag fails here rather than silently
+          # doubling a conversation downstream.
+          - unique:
+              config:
+                where: "is_first_agent_reply"
+      - name: created_at_utc
+        data_tests:
+          - not_null
+
+  - name: stg_clients
+    description: >
+      Clients, SCD2 history, deduplicated to one row per client version.
+      The source's duplicate copies are still reported by a warn-level
+      test on src_clients; this one must pass.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - sev_client_id
+              - _valid_from_utc
+    columns:
+      - name: sev_client_id
+        data_tests:
+          - not_null
+      - name: _valid_from_utc
+        data_tests:
+          - not_null
+      - name: is_test_account
+        description: True for test accounts. The source leaves it NULL otherwise; stg_clients turns that into false.
+        data_tests:
+          - not_null
+
+  - name: stg_dates
+    description: One row per calendar day, plus the UTC -> CEST conversion for office hours.
+    columns:
+      - name: date_day
+        data_tests:
+          - unique
+          - not_null
+      - name: cest_utc_offset_hours
+        description: Hours CEST is ahead of UTC. Fixed at 2 by assumption (see stg_dates.sql).
+        data_tests:
+          - not_null
+      - name: office_opens_at_utc
+        description: 09:00 CEST on this day, expressed in UTC.
+        data_tests:
+          - not_null
+      - name: office_closes_at_utc
+        description: 18:00 CEST on this day, expressed in UTC.
+        data_tests:
+          - not_null
